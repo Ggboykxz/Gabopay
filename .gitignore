@@ -45,3 +45,6 @@ coverage/
 # Temporary
 *.tmp
 *.temp
+# Mobile
+apps/mobile/android/
+apps/mobile/.expo/

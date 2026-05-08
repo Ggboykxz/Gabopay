@@ -1,24 +1,27 @@
 {
-  "name": "mobile",
+  "name": "gabopay-mobile",
   "version": "1.0.0",
   "private": true,
+  "main": "expo-router/entry",
   "scripts": {
-    "dev": "expo start",
-    "build": "expo build",
+    "start": "expo start",
     "android": "expo run:android",
-    "ios": "expo run:ios"
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "prebuild": "expo prebuild"
   },
   "dependencies": {
     "expo": "~52.0.0",
-    "expo-router": "~4.0.0",
-    "react": "18.3.1",
-    "react-native": "0.76.2",
-    "nativewind": "^4.1.0",
-    "tailwindcss": "^4.0.0",
-    "zustand": "^5.0.0",
     "expo-camera": "~16.0.0",
     "expo-notifications": "~0.29.0",
-    "expo-secure-store": "~14.0.0"
+    "expo-router": "~4.0.0",
+    "expo-secure-store": "~14.0.0",
+    "expo-status-bar": "~2.0.1",
+    "react": "18.3.1",
+    "react-native": "0.76.2",
+    "react-native-safe-area-context": "4.12.0",
+    "react-native-screens": "4.3.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
