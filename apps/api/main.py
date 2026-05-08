@@ -8,7 +8,7 @@ import time
 
 from apps.api.core.config import settings
 from apps.api.core.database import create_tables
-from apps.api.api.v1 import charges, refunds, payouts, webhooks, balance, auth
+from apps.api.api.v1 import charges, refunds, payouts, webhooks, balance, auth, kyc
 from apps.api.models import merchant, transaction, provider
 
 
@@ -68,6 +68,7 @@ app.include_router(refunds.router, prefix="/v1/refunds", tags=["refunds"])
 app.include_router(payouts.router, prefix="/v1/payouts", tags=["payouts"])
 app.include_router(webhooks.router, prefix="/v1/webhooks", tags=["webhooks"])
 app.include_router(balance.router, prefix="/v1/balance", tags=["balance"])
+app.include_router(kyc.router, prefix="/v1/kyc", tags=["kyc"])
 
 
 @app.get("/", tags=["health"])

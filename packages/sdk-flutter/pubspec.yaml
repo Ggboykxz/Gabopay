@@ -1,0 +1,20 @@
+name: gabopay
+description: GABOPAY SDK for Flutter
+version: 1.0.0
+homepage: https://gabopay.ga
+repository: https://github.com/Ggboykxz/Gabopay
+license: MIT
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  http: ^1.1.0
+  crypto: ^3.0.3
+
+dev_dependencies:
+  flutter_test: sdk
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

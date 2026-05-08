@@ -2,31 +2,30 @@
   "name": "gabopay",
   "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ]
+  },
   "scripts": {
-    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:api": "cd apps/api && poetry run uvicorn apps.api.main:app --reload",
     "dev:dashboard": "npm run dev --workspace=apps/dashboard",
     "dev:docs": "npm run dev --workspace=apps/docs",
     "dev:mobile": "npm run dev --workspace=apps/mobile",
-    "dev": "concurrently \"npm run dev:api\" \"npm run dev:dashboard\" \"npm run dev:docs\"",
-    "build": "npm run build --workspaces --if-present",
-    "build:api": "npm run build --workspace=apps/api",
     "build:dashboard": "npm run build --workspace=apps/dashboard",
-    "build:docs": "npm run build --workspace=apps/docs",
-    "build:mobile": "npm run build --workspace=apps/mobile",
-    "lint": "npm run lint --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "test:api": "npm run test --workspace=apps/api"
+    "build:docs": "npm run build --workspace=apps/docs"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
     "typescript": "^5.3.3"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "node": ">=18.0.0"
+  },
+  "overrides": {
+    "next": "14.2.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   }
 }

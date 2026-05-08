@@ -12,7 +12,12 @@ export default function DocsLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-gray-50">{children}</body>
+      <head>
+        <style>{`
+          body { margin: 0; font-family: system-ui, sans-serif; background: #f8f9fa; }
+        `}</style>
+      </head>
+      <body>{children}</body>
     </html>
   )
 }
