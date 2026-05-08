@@ -78,6 +78,110 @@ gabopay/
 └── DESIGN.md            # Système de design
 ```
 
+---
+
+## 📱 Application Mobile (GABOPAY Merchant)
+
+L'application mobile permet aux marchands de:
+- 📊 **Dashboard** — Voir le solde, les ventes du jour, le nombre de transactions
+- 📷 **Scanner QR** — Scanner les codes QR de paiement
+- 📜 **Transactions** — Historique complet des transactions
+
+### Prérequis
+
+```bash
+# Node.js 20 LTS (requis pour le build)
+node --version  # ≥ 20.0.0
+
+# Java JDK 21
+java -version
+
+# Android SDK
+echo $ANDROID_HOME  # Doit pointer vers le SDK Android
+```
+
+### Installation
+
+```bash
+cd apps/mobile
+npm install
+```
+
+### Développement
+
+```bash
+# Démarrer Metro bundler
+npm start
+
+# Lancer sur Android
+npm run android
+
+# Lancer sur iOS
+npm run ios
+```
+
+### Build APK
+
+#### Option 1: Debug APK (avec Metro)
+
+```bash
+cd apps/mobile/android
+./gradlew assembleDebug
+# APK: app/build/outputs/apk/debug/app-debug.apk
+```
+
+#### Option 2: Debug APK avec JS bundlé
+
+```bash
+# Configurer pour bundler le JS dans le debug
+# Modifier app/build.gradle: debuggableVariants = []
+
+cd apps/mobile/android
+./gradlew assembleDebug
+```
+
+#### Option 3: Release APK
+
+```bash
+cd apps/mobile/android
+./gradlew assembleRelease
+# APK: app/build/outputs/apk/release/app-release.apk
+```
+
+### Configuration
+
+L'application utilise `app.json` pour la configuration:
+
+```json
+{
+  "expo": {
+    "name": "GABOPAY Merchant",
+    "scheme": "gabopay",
+    "newArchEnabled": false,
+    "android": {
+      "package": "com.gabopay.merchant",
+      "versionCode": 1
+    }
+  }
+}
+```
+
+### Écrans
+
+| Écran | Description |
+|-------|-------------|
+| `index.tsx` | Login marchands |
+| `dashboard.tsx` | Vue principale avec KPI |
+| `scan.tsx` | Scanner QR code |
+| `transactions.tsx` | Liste des transactions |
+
+### Variables d'Environnement
+
+```env
+# URL de l'API backend
+EXPO_PUBLIC_API_URL=http://localhost:8000/v1
+```
+
 ### Stack Technique
 
 | Couche | Technologie |
@@ -527,9 +631,10 @@ Le système de design GABOPAY est documenté dans [DESIGN.md](./DESIGN.md).
 ### Prérequis
 
 ```bash
-# Node.js 18+
+# Node.js 20 LTS (pour mobile: 20.x requis)
 # Python 3.11+
 # Docker
+# Java JDK 21 (pour Android)
 ```
 
 ### Setup Development
@@ -542,6 +647,34 @@ poetry install
 # Configuration pre-commit
 npm run lint
 poetry run ruff check
+```
+
+### Développement Mobile
+
+```bash
+# Installer les dépendances
+cd apps/mobile
+npm install
+
+# Régénérer le projet Android après modification des dépendances
+npx expo prebuild --platform android
+
+# Build debug
+cd android
+./gradlew assembleDebug
+
+# Build release
+./gradlew assembleRelease
+```
+
+### Tests
+
+```bash
+# Python
+poetry run pytest --cov=apps/api
+
+# JavaScript
+npm run test --workspace=packages/sdk-js
 ```
 
 ### Structure des Commits
