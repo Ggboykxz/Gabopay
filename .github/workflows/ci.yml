@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Python dependencies
+        run: |
+          pip install poetry
+          poetry install
+
+      - name: Install Node.js dependencies
+        run: npm ci
+
+      - name: Lint Python
+        run: |
+          cd apps/api
+          poetry run ruff check .
+
+      - name: Type check Python
+        run: |
+          cd apps/api
+          poetry run mypy .
+
+      - name: Lint JavaScript
+        run: npm run lint || true
+
+      - name: Run Python tests
+        run: |
+          cd apps/api
+          poetry run pytest --cov=. --cov-report=xml
+
+      - name: Build dashboard
+        run: |
+          cd apps/dashboard
+          npm run build
+
+      - name: Build docs
+        run: |
+          cd apps/docs
+          npm run build
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run security audit
+        run: |
+          npm audit --audit-level=moderate || true
+          pip-audit || true

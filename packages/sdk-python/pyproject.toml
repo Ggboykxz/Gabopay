@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gabopay"
+version = "1.0.0"
+description = "GABOPAY SDK for Python"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "GABOPAY Team", email = "team@gabopay.ga"}
+]
+keywords = ["payment", "gabon", "airtel", "moov", "mobile-money"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "httpx"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["gabopay"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

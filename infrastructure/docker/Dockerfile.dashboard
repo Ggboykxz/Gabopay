@@ -1,0 +1,27 @@
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+COPY apps/dashboard/ ./apps/dashboard/
+WORKDIR /app/apps/dashboard
+RUN npm run build
+
+FROM node:18-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY --from=builder /app/apps/dashboard/package.json ./apps/dashboard/
+COPY --from=builder /app/apps/dashboard/node_modules ./apps/dashboard/node_modules
+COPY --from=builder /app/apps/dashboard/.next/standalone ./
+COPY --from=builder /app/apps/dashboard/.next/static ./apps/dashboard/.next/static
+
+WORKDIR /app/apps/dashboard
+
+EXPOSE 3000
+
+CMD ["node", "server.js"]
