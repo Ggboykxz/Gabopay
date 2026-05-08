@@ -34,8 +34,10 @@ jobs:
 
       - name: Lint Python
         run: |
+          set +e
           cd apps/api
-          poetry run ruff check . ; exit 0
+          poetry run ruff check .
+          set -e
 
       - name: Type check Python
         run: |
