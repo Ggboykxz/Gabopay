@@ -1,6 +1,5 @@
 """Async database engine and session management."""
 
-from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -48,12 +47,33 @@ def get_session_maker() -> async_sessionmaker[AsyncSession]:
     return async_session_maker
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for getting database sessions."""
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def get_db():
+    """Dependency for getting database sessions (read-write).
+
+    Can be used both as a FastAPI dependency (via Depends) and as a context manager (async with).
+    """
     async with get_session_maker() as session:
         try:
             yield session
             await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+@asynccontextmanager
+async def get_read_db():
+    """Dependency for read-only database sessions (no commit).
+
+    Can be used both as a FastAPI dependency and as a context manager.
+    """
+    async with get_session_maker() as session:
+        try:
+            yield session
         except Exception:
             await session.rollback()
             raise

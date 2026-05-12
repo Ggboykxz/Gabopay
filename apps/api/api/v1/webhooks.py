@@ -1,24 +1,55 @@
 """Webhook endpoints for merchant configuration."""
 
 import uuid
+import re
+import hashlib
+import ipaddress
 from datetime import datetime, timezone
 from typing import List, Optional
+from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-import hashlib
 
 from apps.api.core.database import get_db
 from apps.api.models.merchant import Merchant, WebhookEndpoint, WebhookDelivery
 from apps.api.api.v1.charges import get_api_key_merchant
+from apps.api.core.security import encrypt_credentials
 
 router = APIRouter()
+
+PRIVATE_IPS = {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16"}
+
+
+def _is_private_url(url: str) -> bool:
+    try:
+        host = urlparse(url).hostname
+        if not host:
+            return True
+        ip = ipaddress.ip_address(host)
+        for cidr in PRIVATE_IPS:
+            if ip in ipaddress.ip_network(cidr):
+                return True
+    except ValueError:
+        pass
+    return False
 
 
 class WebhookCreateRequest(BaseModel):
     """Request to create a webhook endpoint."""
     url: str = Field(..., description="Webhook URL")
     events: List[str] = Field(..., description="Events to subscribe to")
+
+
+class WebhookCreateResponse(BaseModel):
+    """Webhook endpoint response with secret."""
+    id: str
+    object: str = "webhook_endpoint"
+    url: str
+    events: List[str]
+    active: bool
+    secret: str
+    created: int
 
 
 class WebhookResponse(BaseModel):
@@ -54,21 +85,38 @@ class WebhookListResponse(BaseModel):
     total: int
 
 
-@router.post("", response_model=WebhookResponse, status_code=status.HTTP_201_CREATED)
+async def get_current_merchant_from_auth(
+    merchant: Merchant = Depends(get_api_key_merchant),
+) -> Merchant:
+    """Get merchant from API key auth."""
+    return merchant[0]
+
+
+@router.post("", response_model=WebhookCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_webhook(
     request: WebhookCreateRequest,
     merchant: Merchant = Depends(get_current_merchant_from_auth),
 ):
     """Create a new webhook endpoint."""
-    import re
-    if not re.match(r"^https?://", request.url):
+    from apps.api.core.config import get_settings
+    settings = get_settings()
+
+    if not re.match(r"^https://", request.url):
+        if settings.is_production or not re.match(r"^https?://", request.url):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="URL must use https://",
+            )
+
+    if _is_private_url(request.url):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="URL must start with http:// or https://",
+            detail="URL must not point to a private or internal network",
         )
 
     secret = uuid.uuid4().hex + uuid.uuid4().hex
     secret_hash = hashlib.sha256(secret.encode()).hexdigest()
+    encrypted_secret = encrypt_credentials(secret)
 
     async with get_db() as db:
         webhook = WebhookEndpoint(
@@ -76,26 +124,21 @@ async def create_webhook(
             url=request.url,
             events=request.events,
             secret_hash=secret_hash,
+            secret_encrypted=encrypted_secret,
             active=True,
         )
         db.add(webhook)
         await db.commit()
 
-        return WebhookResponse(
+        return WebhookCreateResponse(
             id=str(webhook.id),
             object="webhook_endpoint",
             url=webhook.url,
             events=webhook.events,
             active=webhook.active,
+            secret=secret,
             created=int(webhook.created_at.timestamp()),
         )
-
-
-async def get_current_merchant_from_auth(
-    merchant: Merchant = Depends(get_api_key_merchant),
-) -> Merchant:
-    """Get merchant from API key auth."""
-    return merchant[0]
 
 
 @router.get("", response_model=WebhookListResponse)

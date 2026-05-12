@@ -1,5 +1,7 @@
 """GABOPAY SDK Errors"""
 
+from typing import Optional
+
 
 class GabopayError(Exception):
     """Base error for GABOPAY SDK"""
@@ -17,6 +19,3 @@ class WebhookVerificationError(Exception):
     def __init__(self, message: str):
         self.message = message
         super().__init__(self.message)
-
-
-from typing import Optional

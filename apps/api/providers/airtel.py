@@ -1,5 +1,7 @@
 """Airtel Money provider integration."""
 
+import time
+import logging
 import httpx
 import asyncio
 from typing import Optional
@@ -15,40 +17,47 @@ from apps.api.providers.base import (
 )
 from apps.api.core.config import get_settings
 
+logger = logging.getLogger(__name__)
+
+
+def _strip_gabon_prefix(phone: str) -> str:
+    """Strip +241 prefix from Gabonese phone numbers."""
+    if phone.startswith("+241"):
+        return phone[4:]
+    return phone
+
 
 class AirtelMoneyProvider(BaseProvider):
     """Airtel Money provider implementation for Gabon."""
 
     def __init__(self, config: dict = None):
         settings = get_settings()
-        self.base_url = config.get("base_url", settings.AIRTEL_BASE_URL)
-        self.client_id = config.get("client_id", settings.AIRTEL_CLIENT_ID)
-        self.client_secret = config.get("client_secret", settings.AIRTEL_CLIENT_SECRET)
-        self.callback_url = config.get("callback_url", settings.AIRTEL_CALLBACK_URL)
+        self.base_url = config.get("base_url", settings.AIRTEL_BASE_URL) if config else settings.AIRTEL_BASE_URL
+        self.client_id = config.get("client_id", settings.AIRTEL_CLIENT_ID) if config else settings.AIRTEL_CLIENT_ID
+        self.client_secret = config.get("client_secret", settings.AIRTEL_CLIENT_SECRET) if config else settings.AIRTEL_CLIENT_SECRET
+        self.callback_url = config.get("callback_url", settings.AIRTEL_CALLBACK_URL) if config else settings.AIRTEL_CALLBACK_URL
         self._token: Optional[str] = None
         self._token_expires_at: float = 0
+        self._client = httpx.AsyncClient(timeout=30.0)
 
     async def _get_token(self) -> str:
         """Get or refresh Airtel API token."""
-        import time
         if self._token and time.time() < self._token_expires_at:
             return self._token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/auth/oauth2/token",
-                data={
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "grant_type": "client_credentials",
-                },
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            data = response.json()
-            self._token = data["access_token"]
-            self._token_expires_at = time.time() + data.get("expires_in", 3600) - 60
-            return self._token
+        response = await self._client.post(
+            f"{self.base_url}/auth/oauth2/token",
+            data={
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "grant_type": "client_credentials",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        self._token = data["access_token"]
+        self._token_expires_at = time.time() + data.get("expires_in", 3600) - 60
+        return self._token
 
     def get_provider_type(self) -> str:
         return "airtel_money"
@@ -71,7 +80,7 @@ class AirtelMoneyProvider(BaseProvider):
                 "reference": idempotency_key or str(uuid.uuid4()),
                 "subscriber": {
                     "country": "GA",
-                    "msisdn": request.phone.replace("+241", ""),
+                    "msisdn": _strip_gabon_prefix(request.phone),
                 },
                 "transaction": {
                     "amount": str(request.amount),
@@ -81,63 +90,62 @@ class AirtelMoneyProvider(BaseProvider):
                 "description": request.description or "Payment",
             }
 
-            async with httpx.AsyncClient() as client:
-                for attempt in range(3):
-                    try:
-                        response = await client.post(
-                            f"{self.base_url}/merchant/v1/payments",
-                            json=payload,
-                            headers=headers,
-                            timeout=30.0,
-                        )
+            for attempt in range(3):
+                try:
+                    response = await self._client.post(
+                        f"{self.base_url}/merchant/v1/payments",
+                        json=payload,
+                        headers=headers,
+                        timeout=30.0,
+                    )
 
-                        if response.status_code == 200:
-                            data = response.json()
-                            if data.get("status") == "SUCCESS":
-                                return PaymentResponse(
-                                    success=True,
-                                    provider_ref=data.get("transaction_ref"),
-                                    status="succeeded",
-                                )
-                            elif data.get("status") == "PENDING":
-                                return PaymentResponse(
-                                    success=True,
-                                    provider_ref=data.get("transaction_ref"),
-                                    status="pending",
-                                )
-                            else:
-                                return PaymentResponse(
-                                    success=False,
-                                    error_code=data.get("error_code", "unknown"),
-                                    error_message=data.get("message", "Payment failed"),
-                                    status="failed",
-                                )
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get("status") == "SUCCESS":
+                            return PaymentResponse(
+                                success=True,
+                                provider_ref=data.get("transaction_ref"),
+                                status="succeeded",
+                            )
+                        elif data.get("status") == "PENDING":
+                            return PaymentResponse(
+                                success=True,
+                                provider_ref=data.get("transaction_ref"),
+                                status="pending",
+                            )
                         else:
-                            error_data = response.json() if response.text else {}
                             return PaymentResponse(
                                 success=False,
-                                error_code=error_data.get("error_code", "api_error"),
-                                error_message=error_data.get("message", "API error"),
+                                error_code=data.get("error_code", "unknown"),
+                                error_message=data.get("message", "Payment failed"),
                                 status="failed",
                             )
-                    except httpx.TimeoutException:
-                        if attempt == 2:
-                            return PaymentResponse(
-                                success=False,
-                                error_code="timeout",
-                                error_message="Request timed out",
-                                status="failed",
-                            )
-                        await asyncio.sleep(2 ** attempt)
-                    except httpx.HTTPError as e:
-                        if attempt == 2:
-                            return PaymentResponse(
-                                success=False,
-                                error_code="network_error",
-                                error_message=str(e),
-                                status="failed",
-                            )
-                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        error_data = response.json() if response.text else {}
+                        return PaymentResponse(
+                            success=False,
+                            error_code=error_data.get("error_code", "api_error"),
+                            error_message=error_data.get("message", "API error"),
+                            status="failed",
+                        )
+                except httpx.TimeoutException:
+                    if attempt == 2:
+                        return PaymentResponse(
+                            success=False,
+                            error_code="timeout",
+                            error_message="Request timed out",
+                            status="failed",
+                        )
+                    await asyncio.sleep(2 ** attempt)
+                except httpx.HTTPError as e:
+                    if attempt == 2:
+                        return PaymentResponse(
+                            success=False,
+                            error_code="network_error",
+                            error_message=str(e),
+                            status="failed",
+                        )
+                    await asyncio.sleep(2 ** attempt)
 
         except Exception as e:
             return PaymentResponse(
@@ -153,28 +161,26 @@ class AirtelMoneyProvider(BaseProvider):
             token = await self._get_token()
             headers = {"Authorization": f"Bearer {token}"}
 
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.base_url}/merchant/v1/payments/{provider_ref}",
-                    headers=headers,
-                    timeout=30.0,
+            response = await self._client.get(
+                f"{self.base_url}/merchant/v1/payments/{provider_ref}",
+                headers=headers,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                status_map = {
+                    "SUCCESS": "succeeded",
+                    "PENDING": "pending",
+                    "FAILED": "failed",
+                }
+                return PaymentResponse(
+                    success=data.get("status") == "SUCCESS",
+                    provider_ref=provider_ref,
+                    status=status_map.get(data.get("status", ""), "unknown"),
                 )
 
-                if response.status_code == 200:
-                    data = response.json()
-                    status_map = {
-                        "SUCCESS": "succeeded",
-                        "PENDING": "pending",
-                        "FAILED": "failed",
-                    }
-                    return PaymentResponse(
-                        success=data.get("status") == "SUCCESS",
-                        provider_ref=provider_ref,
-                        status=status_map.get(data.get("status", ""), "unknown"),
-                    )
-
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Airtel check_charge_status error: {e}")
 
         return PaymentResponse(
             success=False,
@@ -196,22 +202,21 @@ class AirtelMoneyProvider(BaseProvider):
                 "reason": request.reason or "Refund requested",
             }
 
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/merchant/v1/refunds",
-                    json=payload,
-                    headers=headers,
-                    timeout=30.0,
+            response = await self._client.post(
+                f"{self.base_url}/merchant/v1/refunds",
+                json=payload,
+                headers=headers,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                return RefundResponse(
+                    success=data.get("status") == "SUCCESS",
+                    provider_ref=data.get("refund_ref"),
                 )
 
-                if response.status_code == 200:
-                    data = response.json()
-                    return RefundResponse(
-                        success=data.get("status") == "SUCCESS",
-                        provider_ref=data.get("refund_ref"),
-                    )
-
         except Exception as e:
+            logger.error(f"Airtel refund error: {e}")
             return RefundResponse(
                 success=False,
                 error_message=str(e),
@@ -237,7 +242,7 @@ class AirtelMoneyProvider(BaseProvider):
                 "reference": reference,
                 "subscriber": {
                     "country": "GA",
-                    "msisdn": phone.replace("+241", ""),
+                    "msisdn": _strip_gabon_prefix(phone),
                 },
                 "transaction": {
                     "amount": str(amount),
@@ -246,23 +251,22 @@ class AirtelMoneyProvider(BaseProvider):
                 },
             }
 
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/merchant/v1/disbursements",
-                    json=payload,
-                    headers=headers,
-                    timeout=30.0,
+            response = await self._client.post(
+                f"{self.base_url}/merchant/v1/disbursements",
+                json=payload,
+                headers=headers,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                return PaymentResponse(
+                    success=data.get("status") == "SUCCESS",
+                    provider_ref=data.get("transaction_ref"),
+                    status="succeeded" if data.get("status") == "SUCCESS" else "pending",
                 )
 
-                if response.status_code == 200:
-                    data = response.json()
-                    return PaymentResponse(
-                        success=data.get("status") == "SUCCESS",
-                        provider_ref=data.get("transaction_ref"),
-                        status="succeeded" if data.get("status") == "SUCCESS" else "pending",
-                    )
-
         except Exception as e:
+            logger.error(f"Airtel payout error: {e}")
             return PaymentResponse(
                 success=False,
                 error_message=str(e),

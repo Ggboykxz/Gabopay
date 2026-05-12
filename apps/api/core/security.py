@@ -4,8 +4,11 @@ import hashlib
 import hmac
 import secrets
 import time
+import logging
 from typing import Optional, Tuple
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 from apps.api.core.config import get_settings
 
@@ -40,6 +43,8 @@ def parse_api_key(key: str) -> Optional[Tuple[str, str]]:
     """
     Parse an API key to extract prefix and mode.
 
+    Expected format: gp_test_<random> or gp_live_<random>
+
     Returns:
         Tuple of (prefix, mode) or None if invalid
     """
@@ -47,10 +52,10 @@ def parse_api_key(key: str) -> Optional[Tuple[str, str]]:
         return None
 
     parts = key.split("_")
-    if len(parts) < 2:
+    if len(parts) < 3:
         return None
 
-    prefix = parts[0]
+    prefix = f"{parts[0]}_{parts[1]}"
     mode = parts[1]
 
     if prefix not in ["gp_test", "gp_live"]:
@@ -153,6 +158,7 @@ def encrypt_credentials(data: str, key: Optional[str] = None) -> str:
         key = settings.ENCRYPTION_KEY
 
     if not key:
+        logger.warning("ENCRYPTION_KEY is not set! Credentials will be stored in plaintext.")
         return data
 
     f = Fernet(key.encode() if isinstance(key, str) else key)

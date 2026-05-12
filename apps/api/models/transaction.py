@@ -1,6 +1,7 @@
 """Transaction, Refund, and Payout models."""
 
 import uuid
+from enum import Enum
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import String, DateTime, Text, ForeignKey, Enum as SQLEnum, Index
@@ -10,7 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from apps.api.core.database import Base
 
 
-class TransactionMethod(str):
+class TransactionMethod(str, Enum):
     """Payment method constants."""
     AIRTEL_MONEY = "airtel_money"
     MOOV_MONEY = "moov_money"
@@ -18,7 +19,7 @@ class TransactionMethod(str):
     CASH = "cash"
 
 
-class TransactionStatus(str):
+class TransactionStatus(str, Enum):
     """Transaction status constants."""
     PENDING = "pending"
     PROCESSING = "processing"
@@ -27,13 +28,13 @@ class TransactionStatus(str):
     REFUNDED = "refunded"
 
 
-class TransactionMode(str):
+class TransactionMode(str, Enum):
     """Transaction mode (test or live)."""
     TEST = "test"
     LIVE = "live"
 
 
-class RefundStatus(str):
+class RefundStatus(str, Enum):
     """Refund status constants."""
     PENDING = "pending"
     PROCESSING = "processing"
@@ -41,7 +42,7 @@ class RefundStatus(str):
     FAILED = "failed"
 
 
-class PayoutStatus(str):
+class PayoutStatus(str, Enum):
     """Payout status constants."""
     PENDING = "pending"
     PROCESSING = "processing"
@@ -71,10 +72,10 @@ class Transaction(Base):
     phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     provider_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     idempotency_key: Mapped[Optional[str]] = mapped_column(
-        String(100), unique=True, nullable=True
+        String(100), nullable=True
     )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
     error_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     mode: Mapped[str] = mapped_column(
@@ -100,7 +101,7 @@ class Transaction(Base):
         Index("ix_transactions_merchant_id", "merchant_id"),
         Index("ix_transactions_status", "status"),
         Index("ix_transactions_created_at", "created_at"),
-        Index("ix_transactions_idempotency_key", "idempotency_key"),
+        Index("ix_transactions_idempotency_key_merchant", "merchant_id", "idempotency_key", unique=True),
     )
 
 
@@ -133,6 +134,12 @@ class Refund(Base):
     )
 
     transaction: Mapped["Transaction"] = Relationship("Transaction", back_populates="refunds")
+
+    __table_args__ = (
+        Index("ix_refunds_transaction_id", "transaction_id"),
+        Index("ix_refunds_created_at", "created_at"),
+        Index("ix_refunds_status", "status"),
+    )
 
 
 class Payout(Base):

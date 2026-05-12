@@ -18,6 +18,12 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Cache Python dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -34,23 +40,21 @@ jobs:
 
       - name: Lint Python
         run: |
-          set +e
           cd apps/api
           poetry run ruff check .
-          set -e
 
       - name: Type check Python
         run: |
           cd apps/api
-          poetry run mypy . || true
+          poetry run mypy .
 
       - name: Lint JavaScript
-        run: npm run lint || true
+        run: npm run lint
 
       - name: Run Python tests
         run: |
           cd apps/api
-          poetry run pytest --cov=. --cov-report=xml || true
+          poetry run pytest --cov=. --cov-report=xml
 
       - name: Build dashboard
         run: |
@@ -67,7 +71,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run security audit
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install security tools
         run: |
-          npm audit --audit-level=moderate || true
-          pip-audit || true
+          pip install pip-audit bandit
+
+      - name: Run npm security audit
+        run: npm audit --audit-level=moderate
+
+      - name: Run pip audit
+        run: pip-audit
+
+      - name: Run Bandit SAST
+        run: |
+          cd apps/api
+          bandit -r . -f json -o bandit-report.json || true

@@ -1,16 +1,19 @@
 """Authentication endpoints for dashboard access."""
 
 import uuid
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
+from sqlalchemy import select
+from passlib.hash import bcrypt
 
 from apps.api.core.config import get_settings
 from apps.api.core.database import get_db
-from apps.api.models.merchant import Merchant
+from apps.api.models.merchant import Merchant, MerchantBalance
 
 router = APIRouter()
 security = HTTPBearer()
@@ -53,6 +56,8 @@ def create_access_token(merchant_id: uuid.UUID, email: str) -> str:
         "sub": str(merchant_id),
         "email": email,
         "exp": expires,
+        "iat": datetime.now(timezone.utc),
+        "jti": secrets.token_hex(16),
         "type": "access",
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
@@ -65,16 +70,23 @@ def create_refresh_token(merchant_id: uuid.UUID) -> str:
     payload = {
         "sub": str(merchant_id),
         "exp": expires,
+        "iat": datetime.now(timezone.utc),
+        "jti": secrets.token_hex(16),
         "type": "refresh",
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-def verify_token(token: str) -> dict:
+def verify_token(token: str, expected_type: Optional[str] = None) -> dict:
     """Verify and decode JWT token."""
     settings = get_settings()
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        if expected_type and payload.get("type") != expected_type:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token type",
+            )
         return payload
     except JWTError:
         raise HTTPException(
@@ -87,8 +99,7 @@ async def get_current_merchant(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> Merchant:
     """Get current authenticated merchant."""
-    payload = verify_token(credentials.credentials)
-    from sqlalchemy import select
+    payload = verify_token(credentials.credentials, expected_type="access")
     async with get_db() as db:
         result = await db.execute(
             select(Merchant).where(Merchant.id == uuid.UUID(payload["sub"]))
@@ -105,10 +116,6 @@ async def get_current_merchant(
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def register(request: RegisterRequest):
     """Register a new merchant account."""
-    from passlib.hash import bcrypt
-    from sqlalchemy import select
-    from apps.api.models.merchant import MerchantBalance
-
     async with get_db() as db:
         result = await db.execute(
             select(Merchant).where(Merchant.email == request.email)
@@ -149,10 +156,6 @@ async def register(request: RegisterRequest):
 @router.post("/login", response_model=AuthResponse)
 async def login(request: LoginRequest):
     """Login to merchant account."""
-    from passlib.hash import bcrypt
-    from sqlalchemy import select
-    from apps.api.models.merchant import Merchant
-
     async with get_db() as db:
         result = await db.execute(
             select(Merchant).where(Merchant.email == request.email)
@@ -183,18 +186,9 @@ async def login(request: LoginRequest):
 
 
 @router.post("/refresh", response_model=AuthResponse)
-async def refresh_token(request: RefreshTokenRequest):
+async def refresh_token_endpoint(request: RefreshTokenRequest):
     """Refresh access token."""
-    payload = verify_token(request.refresh_token)
-
-    if payload.get("type") != "refresh":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type",
-        )
-
-    from sqlalchemy import select
-    from apps.api.models.merchant import Merchant
+    payload = verify_token(request.refresh_token, expected_type="refresh")
 
     async with get_db() as db:
         result = await db.execute(

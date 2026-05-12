@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.*
+**/__pycache__
+**/*.pyc
+**/*.pyo
+node_modules
+.next
+dist
+build
+*.md
+apps/mobile/android
+apps/mobile/ios
+**/.DS_Store
+*.log

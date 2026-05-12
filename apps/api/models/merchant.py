@@ -1,6 +1,7 @@
 """Merchant, API Key, and Webhook models."""
 
 import uuid
+from enum import Enum
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import String, Boolean, DateTime, Text, ForeignKey, Enum as SQLEnum
@@ -10,7 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from apps.api.core.database import Base
 
 
-class MerchantStatus(str):
+class MerchantStatus(str, Enum):
     """Merchant status constants."""
     PENDING = "pending"
     ACTIVE = "active"
@@ -18,7 +19,7 @@ class MerchantStatus(str):
     DELETED = "deleted"
 
 
-class KYCStatus(str):
+class KYCStatus(str, Enum):
     """KYC verification status constants."""
     PENDING = "pending"
     SUBMITTED = "submitted"
@@ -47,7 +48,7 @@ class Merchant(Base):
         default=KYCStatus.PENDING,
     )
     kyc_documents: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     two_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -115,6 +116,7 @@ class WebhookEndpoint(Base):
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     events: Mapped[list] = mapped_column(JSONB, default=list)
     secret_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    secret_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

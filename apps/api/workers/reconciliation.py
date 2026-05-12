@@ -1,14 +1,17 @@
 """Reconciliation worker for automatic transaction status updates."""
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from sqlalchemy import select
 
 from apps.api.core.database import get_db
-from apps.api.models.transaction import Transaction, TransactionStatus
+from apps.api.models.transaction import Transaction, TransactionStatus, TransactionMode
 from apps.api.models.merchant import MerchantBalance, BalanceTransaction
 from apps.api.providers.factory import get_provider
 from apps.api.workers.webhook_dispatcher import send_charge_webhook
+
+logger = logging.getLogger(__name__)
 
 
 class ReconciliationWorker:
@@ -24,7 +27,8 @@ class ReconciliationWorker:
         async with get_db() as db:
             result = await db.execute(
                 select(Transaction).where(
-                    Transaction.status == TransactionStatus.PENDING
+                    Transaction.status == TransactionStatus.PENDING,
+                    Transaction.mode != TransactionMode.TEST,
                 )
             )
             transactions = result.scalars().all()
@@ -32,9 +36,6 @@ class ReconciliationWorker:
             reconciled = 0
 
             for transaction in transactions:
-                if transaction.mode == "test":
-                    continue
-
                 provider = get_provider(transaction.method)
 
                 try:
@@ -63,8 +64,8 @@ class ReconciliationWorker:
                         )
                         reconciled += 1
 
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"Reconciliation error for transaction {transaction.id}: {e}")
 
             await db.commit()
             return reconciled
@@ -74,7 +75,7 @@ class ReconciliationWorker:
         result = await db.execute(
             select(MerchantBalance).where(
                 MerchantBalance.merchant_id == transaction.merchant_id
-            )
+            ).with_for_update()
         )
         balance = result.scalar_one_or_none()
 
@@ -102,8 +103,8 @@ async def run_reconciliation():
         try:
             reconciled = await worker.reconcile_pending_transactions()
             if reconciled > 0:
-                print(f"Reconciled {reconciled} transactions")
+                logger.info(f"Reconciled {reconciled} transactions")
         except Exception as e:
-            print(f"Reconciliation error: {e}")
+            logger.error(f"Reconciliation error: {e}")
 
         await asyncio.sleep(3600)

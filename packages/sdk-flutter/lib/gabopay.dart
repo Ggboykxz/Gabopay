@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
 
@@ -118,12 +119,36 @@ class Gabopay {
     return _request('GET', '/v1/balance');
   }
 
+  /// Constant-time string comparison to prevent timing attacks
+  static bool _constantTimeEquals(String a, String b) {
+    if (a.length != b.length) {
+      var result = a.length ^ b.length;
+      final minLen = a.length < b.length ? a.length : b.length;
+      for (var i = 0; i < minLen; i++) {
+        result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+      }
+      return result == 0;
+    }
+    var result = 0;
+    for (var i = 0; i < a.length; i++) {
+      result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+    }
+    return result == 0;
+  }
+
   /// Verify webhook signature
   static bool verifyWebhookSignature(
     String payload,
     String signature,
     String secret,
   ) {
+    if (signature.isEmpty) {
+      throw GabopayException('Signature is required');
+    }
+    if (secret.isEmpty) {
+      throw GabopayException('Secret is required');
+    }
+
     try {
       final parts = signature.split(',');
       final params = <String, String>{};
@@ -141,14 +166,14 @@ class Gabopay {
       if ((now - timestamp).abs() > 300) return false;
 
       final expectedSig = params['v1'];
-      if (expectedSig == null) return false;
+      if (expectedSig == null || expectedSig.isEmpty) return false;
 
       final signedPayload = '$timestamp.$payload';
       final computed = Hmac(sha256, secret.encode())
           .convert(signedPayload.encode())
           .toString();
 
-      return computed == expectedSig;
+      return _constantTimeEquals(computed, expectedSig);
     } catch (_) {
       return false;
     }
@@ -160,6 +185,12 @@ class Gabopay {
     String signature,
     String secret,
   ) {
+    if (signature.isEmpty) {
+      throw GabopayException('Signature is required');
+    }
+    if (secret.isEmpty) {
+      throw GabopayException('Secret is required');
+    }
     if (!verifyWebhookSignature(payload, signature, secret)) {
       throw GabopayException('Invalid webhook signature');
     }

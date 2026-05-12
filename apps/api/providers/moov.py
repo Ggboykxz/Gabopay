@@ -1,5 +1,6 @@
 """Moov Money provider integration."""
 
+import logging
 import httpx
 import asyncio
 from typing import Optional
@@ -15,15 +16,18 @@ from apps.api.providers.base import (
 )
 from apps.api.core.config import get_settings
 
+logger = logging.getLogger(__name__)
+
 
 class MoovMoneyProvider(BaseProvider):
     """Moov Money provider implementation for Gabon."""
 
     def __init__(self, config: dict = None):
         settings = get_settings()
-        self.base_url = config.get("base_url", settings.MOOV_BASE_URL)
-        self.api_key = config.get("api_key", settings.MOOV_API_KEY)
-        self.callback_url = config.get("callback_url", settings.MOOV_CALLBACK_URL)
+        self.base_url = config.get("base_url", settings.MOOV_BASE_URL) if config else settings.MOOV_BASE_URL
+        self.api_key = config.get("api_key", settings.MOOV_API_KEY) if config else settings.MOOV_API_KEY
+        self.callback_url = config.get("callback_url", settings.MOOV_CALLBACK_URL) if config else settings.MOOV_CALLBACK_URL
+        self._client = httpx.AsyncClient(timeout=30.0)
 
     def get_provider_type(self) -> str:
         return "moov_money"
@@ -54,50 +58,49 @@ class MoovMoneyProvider(BaseProvider):
                 "metadata": request.metadata or {},
             }
 
-            async with httpx.AsyncClient() as client:
-                for attempt in range(3):
-                    try:
-                        response = await client.post(
-                            f"{self.base_url}/collect",
-                            json=payload,
-                            headers=headers,
-                            timeout=30.0,
+            for attempt in range(3):
+                try:
+                    response = await self._client.post(
+                        f"{self.base_url}/collect",
+                        json=payload,
+                        headers=headers,
+                        timeout=30.0,
+                    )
+
+                    if response.status_code in (200, 201):
+                        data = response.json()
+                        return PaymentResponse(
+                            success=data.get("status") in ("success", "pending"),
+                            provider_ref=data.get("transaction_id"),
+                            status=data.get("status", "pending"),
+                        )
+                    else:
+                        error_data = response.json() if response.text else {}
+                        return PaymentResponse(
+                            success=False,
+                            error_code=error_data.get("code", "api_error"),
+                            error_message=error_data.get("message", "Payment failed"),
+                            status="failed",
                         )
 
-                        if response.status_code in (200, 201):
-                            data = response.json()
-                            return PaymentResponse(
-                                success=data.get("status") in ("success", "pending"),
-                                provider_ref=data.get("transaction_id"),
-                                status=data.get("status", "pending"),
-                            )
-                        else:
-                            error_data = response.json() if response.text else {}
-                            return PaymentResponse(
-                                success=False,
-                                error_code=error_data.get("code", "api_error"),
-                                error_message=error_data.get("message", "Payment failed"),
-                                status="failed",
-                            )
-
-                    except httpx.TimeoutException:
-                        if attempt == 2:
-                            return PaymentResponse(
-                                success=False,
-                                error_code="timeout",
-                                error_message="Request timed out",
-                                status="failed",
-                            )
-                        await asyncio.sleep(2 ** attempt)
-                    except httpx.HTTPError as e:
-                        if attempt == 2:
-                            return PaymentResponse(
-                                success=False,
-                                error_code="network_error",
-                                error_message=str(e),
-                                status="failed",
-                            )
-                        await asyncio.sleep(2 ** attempt)
+                except httpx.TimeoutException:
+                    if attempt == 2:
+                        return PaymentResponse(
+                            success=False,
+                            error_code="timeout",
+                            error_message="Request timed out",
+                            status="failed",
+                        )
+                    await asyncio.sleep(2 ** attempt)
+                except httpx.HTTPError as e:
+                    if attempt == 2:
+                        return PaymentResponse(
+                            success=False,
+                            error_code="network_error",
+                            error_message=str(e),
+                            status="failed",
+                        )
+                    await asyncio.sleep(2 ** attempt)
 
         except Exception as e:
             return PaymentResponse(
@@ -112,28 +115,26 @@ class MoovMoneyProvider(BaseProvider):
         try:
             headers = self._get_headers()
 
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.base_url}/status/{provider_ref}",
-                    headers=headers,
-                    timeout=30.0,
+            response = await self._client.get(
+                f"{self.base_url}/status/{provider_ref}",
+                headers=headers,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                status_map = {
+                    "success": "succeeded",
+                    "pending": "pending",
+                    "failed": "failed",
+                }
+                return PaymentResponse(
+                    success=data.get("status") == "success",
+                    provider_ref=provider_ref,
+                    status=status_map.get(data.get("status", ""), "unknown"),
                 )
 
-                if response.status_code == 200:
-                    data = response.json()
-                    status_map = {
-                        "success": "succeeded",
-                        "pending": "pending",
-                        "failed": "failed",
-                    }
-                    return PaymentResponse(
-                        success=data.get("status") == "success",
-                        provider_ref=provider_ref,
-                        status=status_map.get(data.get("status", ""), "unknown"),
-                    )
-
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Moov check_charge_status error: {e}")
 
         return PaymentResponse(success=False, status="unknown")
 
@@ -148,22 +149,21 @@ class MoovMoneyProvider(BaseProvider):
                 "reason": request.reason,
             }
 
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/refund",
-                    json=payload,
-                    headers=headers,
-                    timeout=30.0,
+            response = await self._client.post(
+                f"{self.base_url}/refund",
+                json=payload,
+                headers=headers,
+            )
+
+            if response.status_code in (200, 201):
+                data = response.json()
+                return RefundResponse(
+                    success=data.get("status") == "success",
+                    provider_ref=data.get("refund_id"),
                 )
 
-                if response.status_code in (200, 201):
-                    data = response.json()
-                    return RefundResponse(
-                        success=data.get("status") == "success",
-                        provider_ref=data.get("refund_id"),
-                    )
-
         except Exception as e:
+            logger.error(f"Moov refund error: {e}")
             return RefundResponse(
                 success=False,
                 error_message=str(e),
@@ -187,23 +187,22 @@ class MoovMoneyProvider(BaseProvider):
                 "reference": reference,
             }
 
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/disburse",
-                    json=payload,
-                    headers=headers,
-                    timeout=30.0,
+            response = await self._client.post(
+                f"{self.base_url}/disburse",
+                json=payload,
+                headers=headers,
+            )
+
+            if response.status_code in (200, 201):
+                data = response.json()
+                return PaymentResponse(
+                    success=data.get("status") == "success",
+                    provider_ref=data.get("transaction_id"),
+                    status="succeeded",
                 )
 
-                if response.status_code in (200, 201):
-                    data = response.json()
-                    return PaymentResponse(
-                        success=data.get("status") == "success",
-                        provider_ref=data.get("transaction_id"),
-                        status="succeeded",
-                    )
-
         except Exception as e:
+            logger.error(f"Moov payout error: {e}")
             return PaymentResponse(
                 success=False,
                 error_message=str(e),

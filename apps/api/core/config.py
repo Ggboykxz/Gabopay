@@ -1,7 +1,11 @@
 """Application configuration using Pydantic Settings."""
 
+import logging
 from functools import lru_cache
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -11,7 +15,7 @@ class Settings(BaseSettings):
 
     # App
     APP_ENV: str = "development"
-    SECRET_KEY: str = "dev-secret-key-change-in-production"
+    SECRET_KEY: str = ""
     ENCRYPTION_KEY: str = ""
 
     # Database
@@ -32,7 +36,7 @@ class Settings(BaseSettings):
     CINETPAY_SITE_ID: str = ""
 
     # Dashboard auth
-    JWT_SECRET: str = "jwt-secret-change-in-production"
+    JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
@@ -52,11 +56,30 @@ class Settings(BaseSettings):
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = 100
 
+    # CORS
+    ALLOWED_ORIGINS: list[str] = ["https://gabopay.ga"]
+
+    @field_validator("SECRET_KEY", "JWT_SECRET")
+    @classmethod
+    def validate_secrets(cls, v: str, info) -> str:
+        if not v or len(v) < 16:
+            logger.warning(f"{info.field_name} is not set or too short! Use a strong random value in production.")
+        return v
+
+    @field_validator("ENCRYPTION_KEY")
+    @classmethod
+    def validate_encryption_key(cls, v: str) -> str:
+        if not v:
+            logger.warning("ENCRYPTION_KEY is not set! Sensitive data will not be encrypted in production.")
+        return v
+
     @property
     def is_production(self) -> bool:
         """Check if running in production."""
         return self.APP_ENV == "production"
 
+
+settings = Settings()
 
 @lru_cache()
 def get_settings() -> Settings:

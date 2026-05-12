@@ -80,10 +80,21 @@ class Balance:
 
 
 @dataclass
+class WebhookEventData:
+    """Webhook event data object."""
+    id: str
+    amount: int
+    currency: str
+    status: str
+    method: str
+    metadata: Optional[dict] = None
+
+
+@dataclass
 class WebhookEvent:
     """Webhook event object."""
     id: str
     object: str
     type: str
-    data: dict
+    data: WebhookEventData
     created: int

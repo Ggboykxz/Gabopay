@@ -1,5 +1,4 @@
-export function formatXAF(amountInCentimes: number): string {
-  const amount = Math.round(amountInCentimes / 100);
+export function formatXAF(amount: number): string {
   return new Intl.NumberFormat('fr-GA', {
     style: 'currency',
     currency: 'XAF',
@@ -8,13 +7,12 @@ export function formatXAF(amountInCentimes: number): string {
   }).format(amount);
 }
 
-export function formatXAFCompact(amountInCentimes: number): string {
-  const amount = Math.round(amountInCentimes / 100);
+export function formatXAFCompact(amount: number): string {
   if (amount >= 1000000) {
-    return `${(amount / 1000000).toFixed(1)}M FCA`;
+    return `${(amount / 1000000).toFixed(1)}M XAF`;
   }
   if (amount >= 1000) {
-    return `${(amount / 1000).toFixed(0)}K FCA`;
+    return `${(amount / 1000).toFixed(0)}K XAF`;
   }
-  return `${amount} FCA`;
+  return `${amount} XAF`;
 }

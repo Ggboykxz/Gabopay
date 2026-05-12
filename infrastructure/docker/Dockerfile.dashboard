@@ -1,4 +1,4 @@
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -9,11 +9,15 @@ COPY apps/dashboard/ ./apps/dashboard/
 WORKDIR /app/apps/dashboard
 RUN npm run build
 
-FROM node:18-alpine AS runner
+FROM node:20-alpine AS runner
+
+RUN addgroup --system app && adduser --system --ingroup app app
 
 WORKDIR /app
 
 ENV NODE_ENV=production
+
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 COPY --from=builder /app/apps/dashboard/package.json ./apps/dashboard/
 COPY --from=builder /app/apps/dashboard/node_modules ./apps/dashboard/node_modules
@@ -21,6 +25,8 @@ COPY --from=builder /app/apps/dashboard/.next/standalone ./
 COPY --from=builder /app/apps/dashboard/.next/static ./apps/dashboard/.next/static
 
 WORKDIR /app/apps/dashboard
+
+USER app
 
 EXPOSE 3000
 

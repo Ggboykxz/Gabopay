@@ -1,5 +1,6 @@
 """KYC (Know Your Customer) endpoints for merchant onboarding"""
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -33,6 +34,21 @@ class KYBDocument(BaseModel):
     uploaded_at: datetime
 
 
+async def get_merchant_from_auth() -> Merchant:
+    """Placeholder for merchant authentication - would be replaced by actual auth."""
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required for KYC",
+    )
+
+
+async def get_current_merchant_for_kyc(
+    merchant: Merchant = Depends(get_merchant_from_auth),
+) -> Merchant:
+    """Get merchant from auth - placeholder for actual auth dependency."""
+    return merchant
+
+
 @router.post("/kyc/submit", response_model=KYCStatusResponse)
 async def submit_kyc(
     request: KYCSubmitRequest,
@@ -45,7 +61,6 @@ async def submit_kyc(
             detail="Account already verified",
         )
 
-    import json
     current_docs = merchant.kyc_documents or {}
 
     new_doc = {
@@ -92,21 +107,6 @@ async def get_kyc_status(
         kyc_status=merchant.kyc_status,
         documents_submitted=docs.get("documents", []),
         verification_notes=notes,
-    )
-
-
-async def get_current_merchant_for_kyc(
-    merchant: Merchant = Depends(get_merchant_from_auth),
-) -> Merchant:
-    """Get merchant from auth - placeholder for actual auth dependency."""
-    return merchant
-
-
-async def get_merchant_from_auth() -> Merchant:
-    """Placeholder for merchant authentication - would be replaced by actual auth."""
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authentication required for KYC",
     )
 
 
@@ -168,7 +168,6 @@ async def upload_kyc_document(
 
     # In production, this would upload to cloud storage (S3, etc.)
     # For now, we just track the metadata
-    import json
     docs = merchant.kyc_documents or {}
 
     upload_record = {

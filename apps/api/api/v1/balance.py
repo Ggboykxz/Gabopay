@@ -2,10 +2,10 @@
 
 import uuid
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from apps.api.core.database import get_db
 from apps.api.models.merchant import Merchant, MerchantBalance, BalanceTransaction
@@ -38,9 +38,6 @@ class BalanceTransactionListResponse(BaseModel):
     data: List[BalanceTransactionResponse]
     has_more: bool
     total: int
-
-
-from typing import Optional
 
 
 @router.get("", response_model=BalanceResponse)
@@ -84,6 +81,14 @@ async def list_balance_transactions(
     merchant, _, _ = merchant_and_key
 
     async with get_db() as db:
+        count_query = select(func.count()).select_from(BalanceTransaction).where(
+            BalanceTransaction.merchant_id == merchant.id
+        )
+        if type_filter:
+            count_query = count_query.where(BalanceTransaction.type == type_filter)
+        total_result = await db.execute(count_query)
+        total = total_result.scalar() or 0
+
         query = select(BalanceTransaction).where(
             BalanceTransaction.merchant_id == merchant.id
         )
@@ -91,10 +96,12 @@ async def list_balance_transactions(
         if type_filter:
             query = query.where(BalanceTransaction.type == type_filter)
 
-        query = query.order_by(BalanceTransaction.created_at.desc()).limit(limit)
+        query = query.order_by(BalanceTransaction.created_at.desc()).limit(limit + 1)
 
         result = await db.execute(query)
         transactions = result.scalars().all()
+        has_more = len(transactions) > limit
+        transactions = transactions[:limit]
 
         return BalanceTransactionListResponse(
             data=[
@@ -109,6 +116,6 @@ async def list_balance_transactions(
                 )
                 for t in transactions
             ],
-            has_more=len(transactions) == limit,
-            total=len(transactions),
+            has_more=has_more,
+            total=total,
         )

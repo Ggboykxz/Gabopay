@@ -1,5 +1,6 @@
 """Card payment provider integration (CinetPay/Stripe)."""
 
+import logging
 import httpx
 import asyncio
 from typing import Optional
@@ -16,15 +17,18 @@ from apps.api.providers.base import (
 )
 from apps.api.core.config import get_settings
 
+logger = logging.getLogger(__name__)
+
 
 class CardProvider(BaseProvider):
     """Card payment provider (CinetPay for Africa)."""
 
     def __init__(self, config: dict = None):
         settings = get_settings()
-        self.api_key = config.get("api_key", settings.CINETPAY_API_KEY)
-        self.site_id = config.get("site_id", settings.CINETPAY_SITE_ID)
+        self.api_key = config.get("api_key", settings.CINETPAY_API_KEY) if config else settings.CINETPAY_API_KEY
+        self.site_id = config.get("site_id", settings.CINETPAY_SITE_ID) if config else settings.CINETPAY_SITE_ID
         self.base_url = "https://api.cinetpay.com/v1"
+        self._client = httpx.AsyncClient(timeout=30.0)
 
     def get_provider_type(self) -> str:
         return "card"
@@ -60,13 +64,11 @@ class CardProvider(BaseProvider):
 
             payload["signature"] = self._generate_signature(payload)
 
-            async with httpx.AsyncClient() as client:
-                for attempt in range(3):
+            for attempt in range(3):
                     try:
-                        response = await client.post(
+                        response = await self._client.post(
                             f"{self.base_url}/payment/init",
                             json=payload,
-                            timeout=30.0,
                         )
 
                         if response.status_code in (200, 201):
@@ -121,28 +123,26 @@ class CardProvider(BaseProvider):
             }
             payload["signature"] = self._generate_signature(payload)
 
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/payment/check",
-                    json=payload,
-                    timeout=30.0,
+            response = await self._client.post(
+                f"{self.base_url}/payment/check",
+                json=payload,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                status_map = {
+                    "00": "succeeded",
+                    "pending": "pending",
+                    "failed": "failed",
+                }
+                return PaymentResponse(
+                    success=data.get("code") == "00",
+                    provider_ref=provider_ref,
+                    status=status_map.get(str(data.get("code")), "unknown"),
                 )
 
-                if response.status_code == 200:
-                    data = response.json()
-                    status_map = {
-                        "00": "succeeded",
-                        "pending": "pending",
-                        "failed": "failed",
-                    }
-                    return PaymentResponse(
-                        success=data.get("code") == "00",
-                        provider_ref=provider_ref,
-                        status=status_map.get(str(data.get("code")), "unknown"),
-                    )
-
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Card check_charge_status error: {e}")
 
         return PaymentResponse(success=False, status="unknown")
 
@@ -157,21 +157,20 @@ class CardProvider(BaseProvider):
             }
             payload["signature"] = self._generate_signature(payload)
 
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/payment/refund",
-                    json=payload,
-                    timeout=30.0,
+            response = await self._client.post(
+                f"{self.base_url}/payment/refund",
+                json=payload,
+            )
+
+            if response.status_code in (200, 201):
+                data = response.json()
+                return RefundResponse(
+                    success=data.get("code") == "00",
+                    provider_ref=f"refund_{request.provider_ref}",
                 )
 
-                if response.status_code in (200, 201):
-                    data = response.json()
-                    return RefundResponse(
-                        success=data.get("code") == "00",
-                        provider_ref=f"refund_{request.provider_ref}",
-                    )
-
         except Exception as e:
+            logger.error(f"Card refund error: {e}")
             return RefundResponse(
                 success=False,
                 error_message=str(e),

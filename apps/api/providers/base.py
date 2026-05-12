@@ -1,5 +1,6 @@
 """Base provider interface for payment integrations."""
 
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -152,7 +153,6 @@ def simulate_test_payment(phone: str, amount: int) -> PaymentResponse:
         )
 
     # Default: random success/fail for other test numbers
-    import random
     if random.random() > 0.1:
         return PaymentResponse(
             success=True,

@@ -61,6 +61,9 @@ export class Gabopay {
         return response
       } catch (error) {
         lastError = error as Error
+        if (error instanceof GabopayError && error.statusCode && error.statusCode < 500) {
+          throw error
+        }
         if (attempt < this.maxRetries - 1) {
           await this.sleep(Math.pow(2, attempt) * 1000)
         }

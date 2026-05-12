@@ -1,14 +1,17 @@
 """Webhook dispatcher worker."""
 
+import json
 import asyncio
+import logging
 import httpx
-from datetime import datetime, timezone
 from typing import Optional
+from sqlalchemy import select
 
 from apps.api.core.database import get_db
 from apps.api.models.merchant import WebhookEndpoint, WebhookDelivery
-from apps.api.core.security import generate_hmac_signature
-from sqlalchemy import select
+from apps.api.core.security import generate_hmac_signature, decrypt_credentials
+
+logger = logging.getLogger(__name__)
 
 
 class WebhookDispatcher:
@@ -17,6 +20,7 @@ class WebhookDispatcher:
     def __init__(self, max_retries: int = 3, timeout: int = 30):
         self.max_retries = max_retries
         self.timeout = timeout
+        self._client = httpx.AsyncClient(timeout=timeout)
 
     async def dispatch(
         self,
@@ -46,14 +50,11 @@ class WebhookDispatcher:
             if not endpoint or not endpoint.active:
                 return False
 
-            import json
-            payload_str = json.dumps(payload)
-
-            import hashlib
             secret = None
-            for row in await db.execute(select(WebhookEndpoint)):
-                if str(row.id) == endpoint_id:
-                    break
+            if endpoint.secret_encrypted:
+                secret = decrypt_credentials(endpoint.secret_encrypted)
+
+            payload_str = json.dumps(payload)
 
             delivery = WebhookDelivery(
                 endpoint_id=endpoint.id,
@@ -64,49 +65,75 @@ class WebhookDispatcher:
             db.add(delivery)
             await db.flush()
 
-            try:
-                async with httpx.AsyncClient() as client:
-                    for attempt in range(self.max_retries):
-                        try:
-                            signature = generate_hmac_signature(
-                                payload_str,
-                                "secret_placeholder",
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                for attempt in range(self.max_retries):
+                    try:
+                        signature = generate_hmac_signature(
+                            payload_str,
+                            secret or "",
+                        )
+
+                        response = await client.post(
+                            endpoint.url,
+                            content=payload_str,
+                            headers={
+                                "Content-Type": "application/json",
+                                "X-Gabopay-Signature": signature,
+                                "X-Gabopay-Event": event_type,
+                            },
+                        )
+
+                        async with get_db() as db:
+                            result = await db.execute(
+                                select(WebhookDelivery).where(
+                                    WebhookDelivery.id == delivery.id
+                                )
                             )
+                            d = result.scalar_one_or_none()
+                            if d:
+                                d.response_status = response.status_code
+                                d.response_body = response.text[:500] if response.text else None
+                            await db.commit()
 
-                            response = await client.post(
-                                endpoint.url,
-                                content=payload_str,
-                                headers={
-                                    "Content-Type": "application/json",
-                                    "X-Gabopay-Signature": signature,
-                                    "X-Gabopay-Event": event_type,
-                                },
-                                timeout=self.timeout,
+                        if 200 <= response.status_code < 300:
+                            return True
+
+                    except httpx.TimeoutException:
+                        if attempt == self.max_retries - 1:
+                            break
+                        await asyncio.sleep(2 ** attempt)
+                    except httpx.HTTPError:
+                        if attempt == self.max_retries - 1:
+                            break
+                        await asyncio.sleep(2 ** attempt)
+
+                    async with get_db() as db:
+                        result = await db.execute(
+                            select(WebhookDelivery).where(
+                                WebhookDelivery.id == delivery.id
                             )
+                        )
+                        d = result.scalar_one_or_none()
+                        if d:
+                            d.attempt = attempt + 2
+                        await db.commit()
 
-                            delivery.response_status = response.status_code
-                            delivery.response_body = response.text[:500] if response.text else None
+        except Exception as e:
+            logger.error(f"Webhook dispatch error: {e}")
+            async with get_db() as db:
+                result = await db.execute(
+                    select(WebhookDelivery).where(
+                        WebhookDelivery.id == delivery.id
+                    )
+                )
+                d = result.scalar_one_or_none()
+                if d:
+                    d.response_status = 0
+                    d.response_body = str(e)[:500]
+                await db.commit()
 
-                            if 200 <= response.status_code < 300:
-                                return True
-
-                        except httpx.TimeoutException:
-                            if attempt == self.max_retries - 1:
-                                break
-                            await asyncio.sleep(2 ** attempt)
-                        except httpx.HTTPError:
-                            if attempt == self.max_retries - 1:
-                                break
-                            await asyncio.sleep(2 ** attempt)
-
-                        delivery.attempt = attempt + 2
-
-            except Exception as e:
-                delivery.response_status = 0
-                delivery.response_body = str(e)[:500]
-
-            await db.commit()
-            return False
+        return False
 
     async def dispatch_event(
         self,
@@ -142,10 +169,10 @@ async def send_charge_webhook(
     event_type: str,
 ) -> None:
     """Send a charge-related webhook."""
-    async with get_db() as db:
-        from sqlalchemy import select
-        from apps.api.models.transaction import Transaction
+    from sqlalchemy import select
+    from apps.api.models.transaction import Transaction
 
+    async with get_db() as db:
         result = await db.execute(
             select(Transaction).where(Transaction.id == transaction_id)
         )
@@ -164,7 +191,7 @@ async def send_charge_webhook(
                 "currency": transaction.currency,
                 "status": transaction.status,
                 "method": transaction.method,
-                "metadata": transaction.metadata,
+                "metadata": transaction.metadata_,
             },
             "created": int(transaction.created_at.timestamp()),
         }

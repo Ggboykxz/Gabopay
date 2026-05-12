@@ -1,6 +1,7 @@
 """Provider account and configuration models."""
 
 import uuid
+from enum import Enum
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import String, DateTime, Text, Boolean
@@ -10,7 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from apps.api.core.database import Base
 
 
-class ProviderType(str):
+class ProviderType(str, Enum):
     """Provider type constants."""
     AIRTEL_MONEY = "airtel_money"
     MOOV_MONEY = "moov_money"

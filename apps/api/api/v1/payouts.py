@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from apps.api.core.database import get_db
 from apps.api.models.merchant import Merchant, MerchantBalance, BalanceTransaction

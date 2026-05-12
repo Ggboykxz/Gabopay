@@ -1,11 +1,12 @@
 """Charge endpoints for creating and managing payments."""
 
 import uuid
+import hashlib
 from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from apps.api.core.database import get_db
 from apps.api.core.security import parse_api_key, verify_api_key, mask_sensitive_data
@@ -65,19 +66,13 @@ async def get_api_key_merchant(
         )
 
     prefix, mode = key_info
-    key_hash = uuid.uuid4().hex
+    key_hash = hashlib.sha256(x_api_key.encode()).hexdigest()
 
     async with get_db() as db:
         result = await db.execute(
             select(ApiKey).where(ApiKey.key_hash == key_hash)
         )
         api_key = result.scalar_one_or_none()
-
-        if not api_key:
-            for row in await db.execute(select(ApiKey)):
-                if verify_api_key(x_api_key, row.key_hash):
-                    api_key = row
-                    break
 
         if not api_key or api_key.revoked_at:
             raise HTTPException(
@@ -135,11 +130,14 @@ async def create_charge(
             detail="Phone number required for mobile money payments",
         )
 
-    if idempotency_key:
-        async with get_db() as db:
+    fee_amount = calculate_fee(request.amount, request.method)
+
+    async with get_db() as db:
+        if idempotency_key:
             result = await db.execute(
                 select(Transaction).where(
-                    Transaction.idempotency_key == idempotency_key
+                    Transaction.idempotency_key == idempotency_key,
+                    Transaction.merchant_id == merchant.id,
                 )
             )
             existing = result.scalar_one_or_none()
@@ -153,14 +151,11 @@ async def create_charge(
                     method=existing.method,
                     phone=existing.phone,
                     description=existing.description,
-                    metadata=existing.metadata,
+                    metadata=existing.metadata_,
                     fee_amount=existing.fee_amount,
                     created=int(existing.created_at.timestamp()),
                 )
 
-    fee_amount = calculate_fee(request.amount, request.method)
-
-    async with get_db() as db:
         transaction = Transaction(
             merchant_id=merchant.id,
             amount=request.amount,
@@ -226,7 +221,7 @@ async def create_charge(
             method=transaction.method,
             phone=mask_sensitive_data(transaction.phone) if transaction.phone else None,
             description=transaction.description,
-            metadata=transaction.metadata,
+            metadata=transaction.metadata_,
             fee_amount=transaction.fee_amount,
             created=int(transaction.created_at.timestamp()),
         )
@@ -264,7 +259,7 @@ async def get_charge(
             method=transaction.method,
             phone=mask_sensitive_data(transaction.phone) if transaction.phone else None,
             description=transaction.description,
-            metadata=transaction.metadata,
+            metadata=transaction.metadata_,
             fee_amount=transaction.fee_amount,
             created=int(transaction.created_at.timestamp()),
         )
@@ -282,6 +277,14 @@ async def list_charges(
     merchant, _, _ = merchant_and_key
 
     async with get_db() as db:
+        count_query = select(func.count()).select_from(Transaction).where(
+            Transaction.merchant_id == merchant.id
+        )
+        if status_filter:
+            count_query = count_query.where(Transaction.status == status_filter)
+        total_result = await db.execute(count_query)
+        total = total_result.scalar() or 0
+
         query = select(Transaction).where(
             Transaction.merchant_id == merchant.id
         )
@@ -289,10 +292,12 @@ async def list_charges(
         if status_filter:
             query = query.where(Transaction.status == status_filter)
 
-        query = query.order_by(Transaction.created_at.desc()).limit(limit)
+        query = query.order_by(Transaction.created_at.desc()).limit(limit + 1)
 
         result = await db.execute(query)
         transactions = result.scalars().all()
+        has_more = len(transactions) > limit
+        transactions = transactions[:limit]
 
         return ChargeListResponse(
             data=[
@@ -305,12 +310,12 @@ async def list_charges(
                     method=t.method,
                     phone=mask_sensitive_data(t.phone) if t.phone else None,
                     description=t.description,
-                    metadata=t.metadata,
+                    metadata=t.metadata_,
                     fee_amount=t.fee_amount,
                     created=int(t.created_at.timestamp()),
                 )
                 for t in transactions
             ],
-            has_more=len(transactions) == limit,
-            total=len(transactions),
+            has_more=has_more,
+            total=total,
         )
